@@ -1,8 +1,13 @@
 import os
-import logging
+import random
 import asyncio
+import logging
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Update,
+)
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -21,25 +26,46 @@ if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN is not set")
 
 
-# =========================
-# UNO DATA
-# =========================
-
-uno_lobbies = {}
+# ============================================================
+# SETTINGS
+# ============================================================
 
 UNO_JOIN_TIME = 120
 UNO_MIN_PLAYERS = 2
 
 
+# ============================================================
+# GAME STORAGE
+# ============================================================
+
+uno_games = {}
+
+
+# ============================================================
+# MAIN MENU
+# ============================================================
+
 def main_menu():
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🃏 UNO", callback_data="uno"),
-            InlineKeyboardButton("🔤 WORD GAME", callback_data="word"),
+            InlineKeyboardButton(
+                "🃏 UNO",
+                callback_data="uno"
+            ),
+            InlineKeyboardButton(
+                "🔤 WORD GAME",
+                callback_data="word"
+            ),
         ],
         [
-            InlineKeyboardButton("🏏 CRICKET", callback_data="cricket"),
-            InlineKeyboardButton("🎲 LUDO", callback_data="ludo"),
+            InlineKeyboardButton(
+                "🏏 CRICKET",
+                callback_data="cricket"
+            ),
+            InlineKeyboardButton(
+                "🎲 LUDO",
+                callback_data="ludo"
+            ),
         ],
         [
             InlineKeyboardButton(
@@ -49,6 +75,10 @@ def main_menu():
         ],
     ])
 
+
+# ============================================================
+# UNO MENU
+# ============================================================
 
 def uno_menu():
     return InlineKeyboardMarkup([
@@ -73,56 +103,160 @@ def uno_menu():
     ])
 
 
-def get_uno_lobby(chat_id):
-    if chat_id not in uno_lobbies:
-        uno_lobbies[chat_id] = {
-            "players": {},
-            "active": False,
-            "timer_task": None,
-        }
+# ============================================================
+# UNO DECK
+# ============================================================
 
-    return uno_lobbies[chat_id]
+def create_uno_deck():
+
+    deck = []
+
+    colors = [
+        "🔴 Red",
+        "🟡 Yellow",
+        "🟢 Green",
+        "🔵 Blue",
+    ]
+
+    # Number cards
+    for color in colors:
+
+        # One zero
+        deck.append({
+            "color": color,
+            "value": "0",
+        })
+
+        # One 1-9
+        for number in range(1, 10):
+
+            deck.append({
+                "color": color,
+                "value": str(number),
+            })
+
+            deck.append({
+                "color": color,
+                "value": str(number),
+            })
+
+        # Action cards - two each
+        for action in ["Skip", "Reverse", "Draw Two"]:
+
+            deck.append({
+                "color": color,
+                "value": action,
+            })
+
+            deck.append({
+                "color": color,
+                "value": action,
+            })
+
+    # Wild cards
+    for _ in range(4):
+
+        deck.append({
+            "color": "🌈 Wild",
+            "value": "Wild",
+        })
+
+    # Wild Draw Four
+    for _ in range(4):
+
+        deck.append({
+            "color": "🌈 Wild",
+            "value": "Wild Draw Four",
+        })
+
+    random.shuffle(deck)
+
+    return deck
 
 
-def lobby_text(lobby):
-    players = lobby["players"]
+# ============================================================
+# CARD DISPLAY
+# ============================================================
 
-    if not players:
-        player_text = "No players joined yet."
-    else:
-        player_text = "\n".join(
-            f"{index}. {name}"
-            for index, name in enumerate(players.values(), 1)
-        )
+def card_text(card):
 
     return (
-        "🃏 <b>UNO LOBBY</b>\n\n"
-        f"👥 Players: <b>{len(players)}</b>\n"
-        f"⏱️ Joining Time: <b>{UNO_JOIN_TIME} seconds</b>\n\n"
-        f"{player_text}\n\n"
-        "👇 Join the game!"
+        f"{card['color']} "
+        f"**{card['value']}**"
     )
 
 
-# =========================
-# START / MENU
-# =========================
+def hand_text(hand):
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    message = (
+    if not hand:
+        return "🖐️ Your hand is empty."
+
+    lines = []
+
+    for index, card in enumerate(hand, 1):
+
+        lines.append(
+            f"{index}. {card['color']} — "
+            f"<b>{card['value']}</b>"
+        )
+
+    return "\n".join(lines)
+
+
+# ============================================================
+# GET / CREATE GAME
+# ============================================================
+
+def get_game(chat_id):
+
+    if chat_id not in uno_games:
+
+        uno_games[chat_id] = {
+            "players": {},
+            "player_order": [],
+            "active": False,
+            "deck": [],
+            "discard": [],
+            "hands": {},
+            "turn_index": 0,
+            "direction": 1,
+            "timer_task": None,
+        }
+
+    return uno_games[chat_id]
+
+
+# ============================================================
+# START
+# ============================================================
+
+async def start(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
+    text = (
         "🎮 <b>Welcome to CC Gaming!</b> 🔥\n\n"
         "🃏 UNO • 🔤 Word • 🏏 Cricket • 🎲 Ludo\n\n"
         "<b>Choose your game & let's play! 🚀</b>"
     )
 
     await update.message.reply_text(
-        message,
+        text,
         parse_mode="HTML",
         reply_markup=main_menu(),
     )
 
 
-async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ============================================================
+# MENU
+# ============================================================
+
+async def menu(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
     await update.message.reply_text(
         "🎮 <b>CC GAMING MENU</b>",
         parse_mode="HTML",
@@ -130,29 +264,58 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-# =========================
-# UNO COMMANDS
-# =========================
+# ============================================================
+# UNO COMMAND
+# ============================================================
 
-async def uno_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def uno_command(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
     chat_id = update.effective_chat.id
 
-    lobby = get_uno_lobby(chat_id)
+    game = get_game(chat_id)
 
-    if lobby["active"]:
+    if game["active"]:
+
         await update.message.reply_text(
-            "🃏 UNO match is already running!"
+            "🃏 An UNO match is already running!"
         )
+
         return
 
+    players = game["players"]
+
+    player_list = "No players joined yet."
+
+    if players:
+
+        player_list = "\n".join(
+            f"{i}. {name}"
+            for i, name in enumerate(
+                players.values(),
+                1
+            )
+        )
+
+    text = (
+        "🃏 <b>UNO LOBBY</b>\n\n"
+        f"👥 Players: <b>{len(players)}</b>\n"
+        f"⏱️ Joining Time: <b>{UNO_JOIN_TIME} seconds</b>\n\n"
+        f"{player_list}\n\n"
+        "👇 Join the game!"
+    )
+
     await update.message.reply_text(
-        lobby_text(lobby),
+        text,
         parse_mode="HTML",
         reply_markup=uno_menu(),
     )
 
-    if lobby["timer_task"] is None:
-        lobby["timer_task"] = asyncio.create_task(
+    if game["timer_task"] is None:
+
+        game["timer_task"] = asyncio.create_task(
             uno_lobby_timer(
                 context,
                 chat_id
@@ -160,203 +323,150 @@ async def uno_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
-async def join_uno(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ============================================================
+# JOIN UNO
+# ============================================================
+
+async def join_uno(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
     chat_id = update.effective_chat.id
     user = update.effective_user
 
-    lobby = get_uno_lobby(chat_id)
+    game = get_game(chat_id)
 
-    if lobby["active"]:
+    if game["active"]:
+
         await update.message.reply_text(
             "❌ UNO match already started!"
         )
+
         return
 
-    if user.id in lobby["players"]:
+    if user.id in game["players"]:
+
         await update.message.reply_text(
-            "⚠️ You are already in the UNO lobby!"
+            "⚠️ You already joined UNO!"
         )
+
         return
 
-    lobby["players"][user.id] = (
-        user.full_name
-    )
+    game["players"][user.id] = user.full_name
+
+    game["player_order"].append(user.id)
 
     await update.message.reply_text(
         f"🃏 <b>{user.full_name}</b> joined UNO! 🔥\n\n"
-        + lobby_text(lobby),
+        f"👥 Players: <b>{len(game['players'])}</b>",
         parse_mode="HTML",
         reply_markup=uno_menu(),
     )
 
 
-async def leave_uno(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ============================================================
+# LEAVE UNO
+# ============================================================
+
+async def leave_uno(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
     chat_id = update.effective_chat.id
     user = update.effective_user
 
-    lobby = get_uno_lobby(chat_id)
+    game = get_game(chat_id)
 
-    if user.id not in lobby["players"]:
+    if user.id not in game["players"]:
+
         await update.message.reply_text(
             "❌ You are not in the UNO lobby."
         )
+
         return
 
-    del lobby["players"][user.id]
+    del game["players"][user.id]
+
+    if user.id in game["player_order"]:
+
+        game["player_order"].remove(user.id)
 
     await update.message.reply_text(
-        f"🚪 <b>{user.full_name}</b> left UNO.\n\n"
-        + lobby_text(lobby),
+        f"🚪 <b>{user.full_name}</b> left UNO.",
         parse_mode="HTML",
-        reply_markup=uno_menu(),
     )
 
 
-async def force_uno(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    lobby = get_uno_lobby(chat_id)
+# ============================================================
+# FORCE START
+# ============================================================
 
-    if lobby["active"]:
+async def force_uno(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
+    chat_id = update.effective_chat.id
+
+    game = get_game(chat_id)
+
+    if game["active"]:
+
         await update.message.reply_text(
-            "❌ UNO match already started!"
+            "❌ UNO match already running!"
         )
+
         return
 
-    if len(lobby["players"]) < UNO_MIN_PLAYERS:
+    if len(game["players"]) < UNO_MIN_PLAYERS:
+
         await update.message.reply_text(
-            "❌ <b>Minimum 2 players required!</b>\n\n"
-            f"Current players: {len(lobby['players'])}",
+            "❌ <b>Minimum 2 players required!</b>",
             parse_mode="HTML",
         )
+
         return
 
-    await start_uno_match(
+    await start_uno_game(
         context,
         chat_id
     )
 
 
-# =========================
-# UNO BUTTONS
-# =========================
-
-async def uno_join_button(
-    query,
-    context
-):
-    chat_id = query.message.chat.id
-    user = query.from_user
-
-    lobby = get_uno_lobby(chat_id)
-
-    if lobby["active"]:
-        await query.answer(
-            "UNO match already started!",
-            show_alert=True
-        )
-        return
-
-    if user.id in lobby["players"]:
-        await query.answer(
-            "You already joined!",
-            show_alert=True
-        )
-        return
-
-    lobby["players"][user.id] = user.full_name
-
-    await query.answer(
-        "🃏 Joined UNO!",
-        show_alert=False
-    )
-
-    await query.edit_message_text(
-        lobby_text(lobby),
-        parse_mode="HTML",
-        reply_markup=uno_menu(),
-    )
-
-
-async def uno_leave_button(
-    query,
-    context
-):
-    chat_id = query.message.chat.id
-    user = query.from_user
-
-    lobby = get_uno_lobby(chat_id)
-
-    if user.id not in lobby["players"]:
-        await query.answer(
-            "You are not in the lobby!",
-            show_alert=True
-        )
-        return
-
-    del lobby["players"][user.id]
-
-    await query.answer(
-        "🚪 You left UNO."
-    )
-
-    await query.edit_message_text(
-        lobby_text(lobby),
-        parse_mode="HTML",
-        reply_markup=uno_menu(),
-    )
-
-
-async def uno_force_button(
-    query,
-    context
-):
-    chat_id = query.message.chat.id
-    lobby = get_uno_lobby(chat_id)
-
-    if len(lobby["players"]) < UNO_MIN_PLAYERS:
-        await query.answer(
-            "❌ Minimum 2 players required!",
-            show_alert=True
-        )
-        return
-
-    await query.answer(
-        "⚡ Starting UNO!"
-    )
-
-    await start_uno_match(
-        context,
-        chat_id
-    )
-
-
-# =========================
-# UNO TIMER
-# =========================
+# ============================================================
+# LOBBY TIMER
+# ============================================================
 
 async def uno_lobby_timer(
     context,
     chat_id
 ):
-    await asyncio.sleep(UNO_JOIN_TIME)
 
-    lobby = uno_lobbies.get(chat_id)
+    await asyncio.sleep(
+        UNO_JOIN_TIME
+    )
 
-    if not lobby:
+    game = uno_games.get(chat_id)
+
+    if not game:
         return
 
-    lobby["timer_task"] = None
+    game["timer_task"] = None
 
-    if lobby["active"]:
+    if game["active"]:
         return
 
-    if len(lobby["players"]) >= UNO_MIN_PLAYERS:
-        await start_uno_match(
+    if len(game["players"]) >= UNO_MIN_PLAYERS:
+
+        await start_uno_game(
             context,
             chat_id
         )
 
     else:
+
         await context.bot.send_message(
             chat_id,
             "⏰ <b>UNO LOBBY CLOSED</b>\n\n"
@@ -366,55 +476,278 @@ async def uno_lobby_timer(
         )
 
 
-# =========================
-# UNO MATCH START
-# =========================
+# ============================================================
+# START REAL UNO GAME
+# ============================================================
 
-async def start_uno_match(
+async def start_uno_game(
     context,
     chat_id
 ):
-    lobby = get_uno_lobby(chat_id)
 
-    if lobby["active"]:
+    game = get_game(chat_id)
+
+    if game["active"]:
         return
 
-    if len(lobby["players"]) < UNO_MIN_PLAYERS:
+    if len(game["players"]) < UNO_MIN_PLAYERS:
         return
 
-    lobby["active"] = True
+    game["active"] = True
 
-    players = list(lobby["players"].values())
+    # Create deck
+    game["deck"] = create_uno_deck()
 
-    player_text = "\n".join(
-        f"{i}. {name}"
-        for i, name in enumerate(players, 1)
+    game["discard"] = []
+
+    game["hands"] = {}
+
+    game["turn_index"] = 0
+
+    game["direction"] = 1
+
+    # Deal 7 cards to every player
+    for player_id in game["player_order"]:
+
+        game["hands"][player_id] = []
+
+        for _ in range(7):
+
+            card = game["deck"].pop()
+
+            game["hands"][player_id].append(
+                card
+            )
+
+    # First discard card
+    while True:
+
+        first_card = game["deck"].pop()
+
+        # Keep first card simple for Phase 2
+        if first_card["value"].isdigit():
+
+            game["discard"].append(
+                first_card
+            )
+
+            break
+
+        else:
+
+            game["deck"].insert(
+                0,
+                first_card
+            )
+
+            random.shuffle(
+                game["deck"]
+            )
+
+    # Announce game
+    player_lines = []
+
+    for index, player_id in enumerate(
+        game["player_order"],
+        1
+    ):
+
+        name = game["players"][player_id]
+
+        player_lines.append(
+            f"{index}. {name} — 🎴 7 cards"
+        )
+
+    text = (
+        "🔥 <b>UNO MATCH STARTED!</b> 🔥\n\n"
+        + "\n".join(player_lines)
+        + "\n\n"
+        "🃏 Each player received 7 cards.\n"
+        "🔐 Your cards are private.\n\n"
+        "🎯 First turn:"
     )
 
     await context.bot.send_message(
         chat_id,
-        "🔥 <b>UNO MATCH STARTED!</b> 🔥\n\n"
-        f"👥 Players: <b>{len(players)}</b>\n\n"
-        f"{player_text}\n\n"
-        "🃏 Card engine will start in the next phase!",
+        text,
+        parse_mode="HTML",
+    )
+
+    # Send private cards
+    for player_id in game["player_order"]:
+
+        try:
+
+            await send_private_hand(
+                context,
+                chat_id,
+                player_id
+            )
+
+        except Exception:
+
+            await context.bot.send_message(
+                chat_id,
+                f"⚠️ <b>{game['players'][player_id]}</b> "
+                "please open the bot in private chat "
+                "and press /start so I can send your cards.",
+                parse_mode="HTML",
+            )
+
+    await announce_turn(
+        context,
+        chat_id
+    )
+
+
+# ============================================================
+# SEND PRIVATE HAND
+# ============================================================
+
+async def send_private_hand(
+    context,
+    chat_id,
+    player_id
+):
+
+    game = get_game(chat_id)
+
+    hand = game["hands"][player_id]
+
+    text = (
+        "🃏 <b>YOUR UNO HAND</b>\n\n"
+        f"{hand_text(hand)}\n\n"
+        "🔐 Only you can see these cards."
+    )
+
+    await context.bot.send_message(
+        player_id,
+        text,
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton(
+                    "🔄 REFRESH HAND",
+                    callback_data=f"uno_hand:{chat_id}"
+                )
+            ]
+        ]),
+    )
+
+
+# ============================================================
+# ANNOUNCE TURN
+# ============================================================
+
+async def announce_turn(
+    context,
+    chat_id
+):
+
+    game = get_game(chat_id)
+
+    if not game["active"]:
+        return
+
+    player_id = game["player_order"][
+        game["turn_index"]
+    ]
+
+    player_name = game["players"][
+        player_id
+    ]
+
+    top_card = game["discard"][-1]
+
+    await context.bot.send_message(
+        chat_id,
+        "🎯 <b>UNO TURN</b>\n\n"
+        f"🏏 Current Player: <b>{player_name}</b>\n"
+        f"🃏 Top Card: "
+        f"{top_card['color']} "
+        f"<b>{top_card['value']}</b>\n\n"
+        "🔐 Check your private cards.",
         parse_mode="HTML",
     )
 
 
-# =========================
+# ============================================================
+# PRIVATE HAND BUTTON
+# ============================================================
+
+async def refresh_hand(
+    query,
+    context,
+    chat_id
+):
+
+    player_id = query.from_user.id
+
+    game = uno_games.get(
+        chat_id
+    )
+
+    if not game or not game["active"]:
+
+        await query.answer(
+            "No active UNO game.",
+            show_alert=True
+        )
+
+        return
+
+    if player_id not in game["hands"]:
+
+        await query.answer(
+            "You are not part of this game.",
+            show_alert=True
+        )
+
+        return
+
+    hand = game["hands"][player_id]
+
+    await query.answer(
+        "🔄 Hand refreshed!"
+    )
+
+    await query.edit_message_text(
+        "🃏 <b>YOUR UNO HAND</b>\n\n"
+        f"{hand_text(hand)}\n\n"
+        "🔐 Private hand",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton(
+                    "🔄 REFRESH HAND",
+                    callback_data=f"uno_hand:{chat_id}"
+                )
+            ]
+        ]),
+    )
+
+
+# ============================================================
 # BUTTON HANDLER
-# =========================
+# ============================================================
 
 async def button_handler(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE
 ):
+
     query = update.callback_query
+
     data = query.data
 
     await query.answer()
 
+    # -------------------------
+    # MAIN UNO
+    # -------------------------
+
     if data == "uno":
+
         await query.edit_message_text(
             "🃏 <b>UNO</b>\n\n"
             "Start a new UNO lobby:",
@@ -422,25 +755,160 @@ async def button_handler(
             reply_markup=uno_menu(),
         )
 
-    elif data == "uno_join":
-        await uno_join_button(
-            query,
-            context
+        return
+
+    # -------------------------
+    # JOIN
+    # -------------------------
+
+    if data == "uno_join":
+
+        chat_id = query.message.chat.id
+        user = query.from_user
+
+        game = get_game(chat_id)
+
+        if game["active"]:
+
+            await query.answer(
+                "Match already started!",
+                show_alert=True
+            )
+
+            return
+
+        if user.id in game["players"]:
+
+            await query.answer(
+                "You already joined!",
+                show_alert=True
+            )
+
+            return
+
+        game["players"][
+            user.id
+        ] = user.full_name
+
+        game["player_order"].append(
+            user.id
         )
 
-    elif data == "uno_leave":
-        await uno_leave_button(
-            query,
-            context
+        await query.answer(
+            "🃏 Joined UNO!"
         )
 
-    elif data == "uno_force":
-        await uno_force_button(
-            query,
-            context
+        await query.edit_message_text(
+            "🃏 <b>UNO LOBBY</b>\n\n"
+            f"👥 Players: <b>{len(game['players'])}</b>\n\n"
+            + "\n".join(
+                f"{i}. {name}"
+                for i, name in enumerate(
+                    game["players"].values(),
+                    1
+                )
+            )
+            + "\n\n👇 Join the game!",
+            parse_mode="HTML",
+            reply_markup=uno_menu(),
         )
 
-    elif data == "cricket":
+        return
+
+    # -------------------------
+    # LEAVE
+    # -------------------------
+
+    if data == "uno_leave":
+
+        chat_id = query.message.chat.id
+        user = query.from_user
+
+        game = get_game(chat_id)
+
+        if user.id not in game["players"]:
+
+            await query.answer(
+                "You are not in the lobby!",
+                show_alert=True
+            )
+
+            return
+
+        del game["players"][user.id]
+
+        game["player_order"].remove(
+            user.id
+        )
+
+        await query.answer(
+            "🚪 You left UNO."
+        )
+
+        await query.edit_message_text(
+            "🃏 <b>UNO LOBBY</b>\n\n"
+            f"👥 Players: <b>{len(game['players'])}</b>\n\n"
+            "👇 Join the game!",
+            parse_mode="HTML",
+            reply_markup=uno_menu(),
+        )
+
+        return
+
+    # -------------------------
+    # FORCE START
+    # -------------------------
+
+    if data == "uno_force":
+
+        chat_id = query.message.chat.id
+
+        game = get_game(chat_id)
+
+        if len(game["players"]) < UNO_MIN_PLAYERS:
+
+            await query.answer(
+                "❌ Minimum 2 players required!",
+                show_alert=True
+            )
+
+            return
+
+        await query.answer(
+            "⚡ Starting UNO!"
+        )
+
+        await start_uno_game(
+            context,
+            chat_id
+        )
+
+        return
+
+    # -------------------------
+    # PRIVATE HAND
+    # -------------------------
+
+    if data.startswith("uno_hand:"):
+
+        chat_id = int(
+            data.split(":")[1]
+        )
+
+        await refresh_hand(
+            query,
+            context,
+            chat_id
+        )
+
+        return
+
+    # -------------------------
+    # CRICKET
+    # -------------------------
+
+    if data == "cricket":
+
         keyboard = InlineKeyboardMarkup([
             [
                 InlineKeyboardButton(
@@ -475,7 +943,14 @@ async def button_handler(
             reply_markup=keyboard,
         )
 
-    elif data == "ludo":
+        return
+
+    # -------------------------
+    # LUDO
+    # -------------------------
+
+    if data == "ludo":
+
         keyboard = InlineKeyboardMarkup([
             [
                 InlineKeyboardButton(
@@ -505,7 +980,14 @@ async def button_handler(
             reply_markup=keyboard,
         )
 
-    elif data == "leaderboards":
+        return
+
+    # -------------------------
+    # LEADERBOARD
+    # -------------------------
+
+    if data == "leaderboards":
+
         await query.edit_message_text(
             "🏆 <b>LEADERBOARDS</b>\n\n"
             "🃏 UNO\n"
@@ -523,17 +1005,26 @@ async def button_handler(
             ]),
         )
 
-    elif data == "home":
+        return
+
+    # -------------------------
+    # HOME
+    # -------------------------
+
+    if data == "home":
+
         await query.edit_message_text(
             "🎮 <b>CC GAMING MENU</b>",
             parse_mode="HTML",
             reply_markup=main_menu(),
         )
 
+        return
 
-# =========================
+
+# ============================================================
 # MAIN
-# =========================
+# ============================================================
 
 def main():
 
@@ -592,10 +1083,12 @@ def main():
         )
     )
 
-    print("🤖 CC Gaming Bot Started!")
+    print(
+        "🤖 CC Gaming Bot Started!"
+    )
 
     app.run_polling()
 
 
 if __name__ == "__main__":
-    main()
+    main() hi
