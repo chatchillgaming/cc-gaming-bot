@@ -1,20 +1,12 @@
-# CC Gaming Bot
+# CC Gaming Bot — Word Clue v1
 
-Telegram gaming bot starter for Chat & Chill.
+Word Clue is the first playable module.
 
-Games:
-- UNO (2+ players; game engine can be extended)
-- Cricket (number-match engine hook)
-- Word Clue (host chooses word, 5-minute round, correct answer = 2 points)
-- Ludo (2-6 players; standard-rule engine hook)
-
-Leaderboards are separate for each game.
-
-## Deploy
-1. Create a Telegram bot with @BotFather.
-2. Create a GitHub repository and upload this project.
-3. On Railway, deploy the GitHub repository.
-4. Add environment variable `BOT_TOKEN` with your BotFather token.
-5. Deploy.
-
-Never commit `BOT_TOKEN` to GitHub.
+Flow:
+1. In group: /wordhost
+2. Host privately: /wordset SECRET_WORD
+3. Bot announces the round in the group.
+4. Host gives a clue without revealing the word.
+5. Players answer in the group.
+6. First exact answer gets +2 Word points.
+7. Round expires after 5 minutes.
