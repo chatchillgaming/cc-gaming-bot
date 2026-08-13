@@ -1604,7 +1604,7 @@ async def button_handler(
 
         if game["active"]:
 
-            await query.edit_message_text(
+            await query.edit_message_text()
                 "🔥 <b>UNO MATCH ACTIVE</b>\n\n"
                 "❌ Another UNO match cannot be started "
                 "until the current match ends.",
